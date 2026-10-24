@@ -1,0 +1,37 @@
+BasedOnStyle: LLVM
+IndentWidth: 2
+ContinuationIndentWidth: 2
+UseTab: Never
+BreakBeforeBraces: Linux
+# AlignAfterOpenBracket: BlockIndent
+IndentCaseLabels: true
+ColumnLimit: 120
+
+AllowShortIfStatementsOnASingleLine: false
+AllowShortBlocksOnASingleLine: false
+AllowShortFunctionsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+
+AlignConsecutiveAssignments: true
+AlignConsecutiveBitFields: true
+AlignConsecutiveMacros: true
+
+SkipMacroDefinitionBody: true
+
+# Lower Priority value = earlier in the list
+IncludeCategories:
+  # 1) Local or system header with NO slash, e.g. "config.h" or <vector>
+  - Regex: '^[<"][^/]+[>"]$'
+    Priority: 1
+
+  # 2) Exactly ONE slash, e.g. <joybus/joybus.h>
+  - Regex: '^[<"][^/]+/[^/]+[>"]$'
+    Priority: 2
+
+  # 3) TWO OR MORE slashes, e.g. <joybus/backend/gecko.h>
+  - Regex: '^[<"].*/.*/.*[>"]$'
+    Priority: 3
+
+  # 4) Fallback (anything else)
+  - Regex: ".*"
+    Priority: 100

@@ -1,0 +1,187 @@
+#include <stddef.h>
+#include <stdint.h>
+
+#include <tinysd/bits.h>
+#include <tinysd/commands.h>
+#include <tinysd/config.h>
+
+#include <tinysd/card.h>
+
+// next_block when no read has come before
+#define NO_BLOCK UINT32_MAX
+
+// Status errors that mark a failed write, leaving out the range error an open write may raise
+static const uint32_t write_errors = TSD_STATUS_ADDRESS_ERROR | TSD_STATUS_BLOCK_LEN_ERROR | TSD_STATUS_WP_VIOLATION |
+                                     TSD_STATUS_CARD_ECC_FAILED | TSD_STATUS_CC_ERROR | TSD_STATUS_ERROR;
+
+// Address a block by number on a high capacity card and by byte offset on the others
+static uint32_t block_address(struct tsd_card *card, uint32_t block)
+{
+  return card->high_capacity ? block : block * TSD_CARD_BLOCK_SIZE;
+}
+
+// Move blocks with a single block command, or a multiple block command that CMD12 ends
+static int transfer_blocks(struct tsd_card *card, void *buffer, uint32_t block, uint32_t count, bool write)
+{
+  // Refuse an empty transfer
+  if (count == 0)
+    return TSD_ERR_PARAM;
+
+  // Pick the command for one block or more
+  uint8_t index;
+  if (count == 1) {
+    index = write ? TSD_CMD_WRITE_BLOCK : TSD_CMD_READ_SINGLE_BLOCK;
+  } else {
+    index = write ? TSD_CMD_WRITE_MULTIPLE_BLOCK : TSD_CMD_READ_MULTIPLE_BLOCK;
+  }
+
+  // Run the command
+  struct tsd_command command = {
+    .index         = index,
+    .argument      = block_address(card, block),
+    .response_type = TSD_RESPONSE_R1,
+  };
+  struct tsd_data data = {
+    .buffer     = buffer,
+    .block_size = TSD_CARD_BLOCK_SIZE,
+    .blocks     = count,
+    .write      = write,
+  };
+  int ret = tsd_host_request(card->host, &command, &data);
+
+  // End a multiple block transfer with CMD12, even after a failure, and report the first error
+  if (count > 1) {
+    // Wait out a busy only after a write, since a read leaves the card nothing to program
+    enum tsd_response stop_type = write ? TSD_RESPONSE_R1B : TSD_RESPONSE_R1;
+
+    // Send CMD12, keeping the first error
+    uint32_t status = 0;
+    int stop_ret    = tsd_host_send_command(card->host, TSD_CMD_STOP_TRANSMISSION, 0, stop_type, &status);
+    if (ret == 0)
+      ret = stop_ret;
+
+    // Report an error the card flagged while it took the blocks of a write
+    if (ret == 0 && write && (status & write_errors))
+      ret = TSD_ERR_CARD;
+  }
+
+  return ret;
+}
+
+// Ask the card for its status with CMD13 and report an error it flags
+static int check_status(struct tsd_card *card)
+{
+  // Ask the card for its status
+  uint32_t address = card->address << TSD_RCA_SHIFT;
+  uint32_t status  = 0;
+  int ret          = tsd_host_send_command(card->host, TSD_CMD_SEND_STATUS, address, TSD_RESPONSE_R1, &status);
+  if (ret < 0)
+    return ret;
+
+  // Report an error bit the card set
+  return status & write_errors ? TSD_ERR_CARD : 0;
+}
+
+// End an open read with CMD12, which has no busy after a read, leaving the card ready for another command
+static int stop_read(struct tsd_card *card)
+{
+  if (!card->reading)
+    return 0;
+
+  // Mark the read closed, then close it
+  card->reading = false;
+  return tsd_host_send_command(card->host, TSD_CMD_STOP_TRANSMISSION, 0, TSD_RESPONSE_R1, NULL);
+}
+
+// Open a read at block with CMD18 and no count, and take count blocks from it
+static int open_read(struct tsd_card *card, void *buffer, uint32_t block, uint32_t count)
+{
+  // Open the read, which the host leaves running
+  struct tsd_command command = {
+    .index         = TSD_CMD_READ_MULTIPLE_BLOCK,
+    .argument      = block_address(card, block),
+    .response_type = TSD_RESPONSE_R1,
+  };
+  struct tsd_data data = {
+    .block_size = TSD_CARD_BLOCK_SIZE,
+    .blocks     = 0,
+  };
+  int ret = tsd_host_request(card->host, &command, &data);
+  if (ret < 0)
+    return ret;
+  card->reading = true;
+
+  // Take the blocks asked for
+  return tsd_host_continue_read(card->host, buffer, count);
+}
+
+int tsd_card_read(struct tsd_card *card, void *buffer, uint32_t block, uint32_t count)
+{
+  // Refuse an empty read or one past the end of the card
+  if (count == 0 || block >= card->blocks || count > card->blocks - block)
+    return TSD_ERR_PARAM;
+
+  // Take more blocks from the open read when this one starts where it stands
+  int ret;
+  if (card->reading && block == card->next_block) {
+    ret = tsd_host_continue_read(card->host, buffer, count);
+    if (ret < 0) {
+      stop_read(card);
+      return ret;
+    }
+    card->next_block += count;
+    return 0;
+  }
+
+  // Note whether a lone block read just came before this one
+  bool follows = !card->reading && block == card->next_block;
+
+  // End any other open read
+  ret = stop_read(card);
+  if (ret < 0) {
+    card->next_block = NO_BLOCK;
+    return ret;
+  }
+
+  // Open a read for more than one block, or for a block that follows a lone one, on a host that can stream
+  bool stream = TSD_USE_OPEN_READS && card->host->api->continue_read && (count > 1 || follows);
+  if (stream) {
+    ret = open_read(card, buffer, block, count);
+    if (ret < 0)
+      stop_read(card);
+  } else {
+    ret = transfer_blocks(card, buffer, block, count, false);
+  }
+
+  // Note where the next read would follow on
+  card->next_block = ret < 0 ? NO_BLOCK : block + count;
+  return ret;
+}
+
+int tsd_card_write(struct tsd_card *card, const void *buffer, uint32_t block, uint32_t count)
+{
+  // Refuse a write past the end of the card
+  if (block >= card->blocks || count > card->blocks - block)
+    return TSD_ERR_PARAM;
+
+  // Forget where a read would follow on, since the write comes between
+  card->next_block = NO_BLOCK;
+
+  // End an open read, since the card takes no other command while it sends
+  int ret = stop_read(card);
+  if (ret < 0)
+    return ret;
+
+  // Write the blocks, then check the card's status for an error from programming them
+  ret = transfer_blocks(card, (void *)buffer, block, count, true);
+  if (ret < 0)
+    return ret;
+  return check_status(card);
+}
+
+int tsd_card_sync(struct tsd_card *card)
+{
+  // Forget where a read would follow on, and end an open read
+  card->next_block = NO_BLOCK;
+  return stop_read(card);
+}
