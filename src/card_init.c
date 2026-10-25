@@ -170,10 +170,10 @@ int tsd_card_init(struct tsd_card *card, struct tsd_host *host, uint8_t width, u
   card->next_block    = UINT32_MAX;
 
   // Start at the identification clock on one data line
-  int ret = tsd_host_set_clock(host, IDENTIFICATION_CLOCK_KHZ);
+  int ret = tsd_host_set_clock(card->host, IDENTIFICATION_CLOCK_KHZ);
   if (ret < 0)
     return ret;
-  tsd_host_set_bus_width(host, 1);
+  tsd_host_set_bus_width(card->host, 1);
 
   // Let the clock run before the first command
   tsd_delay_us(FIRST_COMMAND_DELAY_US);
@@ -224,12 +224,12 @@ int tsd_card_init(struct tsd_card *card, struct tsd_host *host, uint8_t width, u
     ret = send_app_command(card, TSD_ACMD_SET_BUS_WIDTH, TSD_ACMD6_BUS_WIDTH_4BIT, TSD_RESPONSE_R1, NULL);
     if (ret < 0)
       return ret;
-    tsd_host_set_bus_width(host, 4);
+    tsd_host_set_bus_width(card->host, 4);
   }
 
   // Run a clock above default speed only once the card switches to high speed
   if (clock_khz > DEFAULT_SPEED_MAX_KHZ && !switch_to_high_speed(card))
     clock_khz = DEFAULT_SPEED_MAX_KHZ;
 
-  return tsd_host_set_clock(host, clock_khz);
+  return tsd_host_set_clock(card->host, clock_khz);
 }
