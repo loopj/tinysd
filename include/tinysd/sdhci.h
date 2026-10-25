@@ -22,7 +22,7 @@ struct tsd_sdhci_config {
   void (*dma_unmap)(struct tsd_sdhci *sdhci, void *buffer, uint32_t len, bool read);
 };
 
-/** Cast the host interface back to the SD host controller that embeds it first. */
+/** Macro to cast a generic host instance to an SDHCI host instance. */
 #define TSD_SDHCI(host) ((struct tsd_sdhci *)(host))
 
 /**
@@ -46,7 +46,7 @@ struct tsd_sdhci {
 };
 
 /**
- * Reset the controller, mask its interrupts, power the bus and fill in its host interface.
+ * Initialize an SDHCI host.
  *
  * @param sdhci the controller
  * @param config the controller's configuration
@@ -55,7 +55,7 @@ struct tsd_sdhci {
 int tsd_sdhci_init(struct tsd_sdhci *sdhci, struct tsd_sdhci_config config);
 
 /**
- * Leave the controller as a full reset leaves it, clock and bus power off and every interrupt disabled.
+ * Deinitialize an SDHCI host.
  *
  * @param sdhci the controller
  */

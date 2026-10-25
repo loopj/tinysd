@@ -73,7 +73,7 @@ struct tsd_data {
   uint32_t done;
 };
 
-/** Cast a concrete host, such as a struct tsd_sdhci, to the host interface it embeds first. */
+/** Macro to cast a concrete host instance to a generic host instance. */
 #define TSD_HOST(host) ((struct tsd_host *)(host))
 
 /**
