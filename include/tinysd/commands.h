@@ -34,6 +34,36 @@
 #define TSD_STATUS_APP_CMD             TSD_BIT(5)
 #define TSD_STATUS_AKE_SEQ_ERROR       TSD_BIT(3)
 
+/** R1 fields in SPI mode, from Figure 7-9 of the SD specification. */
+#define TSD_SPI_R1_IN_IDLE_STATE       TSD_BIT(0)
+#define TSD_SPI_R1_ERASE_RESET         TSD_BIT(1)
+#define TSD_SPI_R1_ILLEGAL_COMMAND     TSD_BIT(2)
+#define TSD_SPI_R1_COM_CRC_ERROR       TSD_BIT(3)
+#define TSD_SPI_R1_ERASE_SEQ_ERROR     TSD_BIT(4)
+#define TSD_SPI_R1_ADDRESS_ERROR       TSD_BIT(5)
+#define TSD_SPI_R1_PARAMETER_ERROR     TSD_BIT(6)
+
+/** R2 fields in SPI mode, with the R1 in bits 7 to 0, from Figure 7-10 of the SD specification. */
+#define TSD_SPI_R2_CARD_IS_LOCKED      TSD_BIT(8)
+#define TSD_SPI_R2_WP_ERASE_SKIP       TSD_BIT(9)
+#define TSD_SPI_R2_ERROR               TSD_BIT(10)
+#define TSD_SPI_R2_CC_ERROR            TSD_BIT(11)
+#define TSD_SPI_R2_CARD_ECC_FAILED     TSD_BIT(12)
+#define TSD_SPI_R2_WP_VIOLATION        TSD_BIT(13)
+#define TSD_SPI_R2_ERASE_PARAM         TSD_BIT(14)
+#define TSD_SPI_R2_OUT_OF_RANGE        TSD_BIT(15)
+
+/** Tokens that start and stop data blocks in SPI mode, from Section 7.3.3.2 of the SD specification. */
+#define TSD_SPI_TOKEN_START_BLOCK      0xfe
+#define TSD_SPI_TOKEN_MULTI_WRITE      0xfc
+#define TSD_SPI_TOKEN_STOP_TRAN        0xfd
+
+/** Data response token in SPI mode and its status values, from Section 7.3.3.1 of the SD specification. */
+#define TSD_SPI_DATA_RESPONSE_STATUS   TSD_BITS(3, 1)
+#define TSD_SPI_DATA_ACCEPTED          2
+#define TSD_SPI_DATA_CRC_ERROR         5
+#define TSD_SPI_DATA_WRITE_ERROR       6
+
 /** CMD6 high speed switch, and where its status reports the function. */
 #define TSD_SWITCH_HIGH_SPEED          0x80fffff1u
 #define TSD_SWITCH_STATUS_LEN          64
@@ -167,6 +197,12 @@ enum tsd_command_index {
 
   /** Mark the next command as an application command. */
   TSD_CMD_APP_CMD = 55,
+
+  /** Read the card's OCR, in SPI mode only. */
+  TSD_CMD_SPI_READ_OCR = 58,
+
+  /** Turn CRC checking on or off, in SPI mode only. */
+  TSD_CMD_SPI_CRC_ON_OFF = 59,
 };
 
 /**
