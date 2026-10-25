@@ -24,7 +24,7 @@
 // Highest function number the argument's 3-bit field holds
 #define FUNCTION_MAX 7
 
-// Turn the error flags of an R5 into a tsd_error, like Linux
+// Turn the error flags of an R5 into a tsd_error
 static int check_response(uint32_t response)
 {
   // Report a general error first, then a bad function or argument

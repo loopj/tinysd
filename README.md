@@ -99,6 +99,7 @@ For example, when using FatFs:
 | `disk_read`                        | `tsd_card_read`       |
 | `disk_write`                       | `tsd_card_write`      |
 | `CTRL_SYNC` in `disk_ioctl`        | `tsd_card_sync`       |
+| `CTRL_TRIM` in `disk_ioctl`        | `tsd_card_erase`      |
 | `GET_SECTOR_SIZE` in `disk_ioctl`  | `TSD_CARD_BLOCK_SIZE` |
 | `GET_SECTOR_COUNT` in `disk_ioctl` | `card.blocks`         |
 

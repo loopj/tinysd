@@ -48,6 +48,10 @@ void setUp(void)
   host.replies[TSD_CMD_SEND_IF_COND].response[0]       = 0x1aa;
   host.replies[TSD_ACMD_SD_SEND_OP_COND].response[0]   = TSD_OCR_READY | TSD_OCR_CCS;
   host.replies[TSD_CMD_SEND_RELATIVE_ADDR].response[0] = 0x00010000;
+
+  // Script a card ready for data in the transfer state, for the CMD13 after a write or an erase
+  host.replies[TSD_CMD_SEND_STATUS].response[0] =
+    TSD_STATUS_READY_FOR_DATA | TSD_FIELD_PREP(TSD_STATUS_CURRENT_STATE, TSD_STATUS_STATE_TRAN);
 }
 
 void tearDown(void)
@@ -144,7 +148,27 @@ static void test_multiple_block_write(void)
   TEST_ASSERT_EQUAL_INT(TSD_ERR_CARD, tsd_card_write(&card, buffer, 0, 4));
 }
 
-// Test that a read or write past the end is refused without a command
+// Test that an erase sets its first and last blocks, then erases without a busy
+static void test_erase(void)
+{
+  init_high_capacity();
+
+  TEST_ASSERT_EQUAL_INT(0, tsd_card_erase(&card, 8, 8));
+  TEST_ASSERT_EQUAL_UINT32(8, harness_find(TSD_CMD_ERASE_WR_BLK_START)->argument);
+  TEST_ASSERT_EQUAL_UINT32(15, harness_find(TSD_CMD_ERASE_WR_BLK_END)->argument);
+  TEST_ASSERT_EQUAL_INT(TSD_RESPONSE_R1, harness_find(TSD_CMD_ERASE)->response_type);
+}
+
+// Test that an erase reports an error bit the card sets once it finishes
+static void test_erase_error(void)
+{
+  init_high_capacity();
+  host.replies[TSD_CMD_SEND_STATUS].response[0] = TSD_STATUS_ERASE_PARAM;
+
+  TEST_ASSERT_EQUAL_INT(TSD_ERR_CARD, tsd_card_erase(&card, 8, 8));
+}
+
+// Test that a read, write or erase past the end is refused without a command
 static void test_past_the_end(void)
 {
   init_high_capacity();
@@ -152,6 +176,7 @@ static void test_past_the_end(void)
 
   TEST_ASSERT_EQUAL_INT(TSD_ERR_PARAM, tsd_card_read(&card, buffer, card.blocks - 1, 2));
   TEST_ASSERT_EQUAL_INT(TSD_ERR_PARAM, tsd_card_write(&card, buffer, card.blocks, 1));
+  TEST_ASSERT_EQUAL_INT(TSD_ERR_PARAM, tsd_card_erase(&card, card.blocks - 1, 2));
   TEST_ASSERT_EQUAL_INT(sent, host.command_count);
 }
 
@@ -168,6 +193,8 @@ int main(int argc, char **argv)
   RUN_TEST(test_read_high_capacity_by_block);
   RUN_TEST(test_open_read);
   RUN_TEST(test_multiple_block_write);
+  RUN_TEST(test_erase);
+  RUN_TEST(test_erase_error);
   RUN_TEST(test_past_the_end);
 
   return UNITY_END();

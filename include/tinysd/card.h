@@ -33,7 +33,7 @@ struct tsd_card {
 };
 
 /**
- * Bring a card up at a bus width and clock.
+ * Initialize a card at a bus width and clock.
  *
  * @param card the card
  * @param host the host the card sits on, started by the caller
@@ -44,8 +44,10 @@ struct tsd_card {
 int tsd_card_init(struct tsd_card *card, struct tsd_host *host, uint8_t width, uint32_t clock_khz);
 
 /**
- * Read blocks, leaving the read open for the next call to continue on a host that offers continue_read. Call
- * tsd_card_sync to end it.
+ * Read blocks.
+ *
+ * On a host that offers continue_read, the read stays open for the next read to continue. A write, an erase, a read
+ * elsewhere or tsd_card_sync ends it.
  *
  * @param card the card
  * @param buffer receives count blocks, aligned as the host requires
@@ -56,7 +58,7 @@ int tsd_card_init(struct tsd_card *card, struct tsd_host *host, uint8_t width, u
 int tsd_card_read(struct tsd_card *card, void *buffer, uint32_t block, uint32_t count);
 
 /**
- * Write blocks, all within one call, ending any open read first.
+ * Write blocks.
  *
  * @param card the card
  * @param buffer count blocks to write, aligned as the host requires
@@ -67,7 +69,17 @@ int tsd_card_read(struct tsd_card *card, void *buffer, uint32_t block, uint32_t 
 int tsd_card_write(struct tsd_card *card, const void *buffer, uint32_t block, uint32_t count);
 
 /**
- * End any open read, leaving the card idle, such as before a power down or for FatFs's CTRL_SYNC.
+ * Erase blocks.
+ *
+ * @param card the card
+ * @param block the first block
+ * @param count the number of blocks
+ * @return 0 or a negative tsd_error
+ */
+int tsd_card_erase(struct tsd_card *card, uint32_t block, uint32_t count);
+
+/**
+ * End any open read.
  *
  * @param card the card
  * @return 0 or a negative tsd_error

@@ -39,7 +39,7 @@
 // SDMA buffer boundary, which a buffer must not cross
 #define DMA_BOUNDARY (4096u << SDMA_BOUNDARY_512K)
 
-// Delay between status reads while a wait polls, in microseconds, like Linux SDHCI
+// Delay between status reads while a wait polls, in microseconds
 #define WAIT_STEP_US 10
 
 // Longest wait for a command phase, in milliseconds
@@ -610,7 +610,7 @@ static int run_command(struct tsd_sdhci *sdhci, struct tsd_command *command, str
   // Wait for the previous command to leave the command line
   int ret = wait_register(sdhci, REG_PRESENT_STATE, STATE_CMD_INHIBIT, false, COMMAND_TIMEOUT_MS, NULL);
 
-  // Wait for the data lines too, which stay busy while the card programs a write, like Zephyr's TI driver
+  // Wait for the data lines too, which stay busy while the card programs a write
   if (ret == 0)
     ret = wait_register(sdhci, REG_PRESENT_STATE, STATE_DAT_INHIBIT, false, DATA_TIMEOUT_MS, NULL);
   if (ret < 0) {
