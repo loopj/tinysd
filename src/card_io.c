@@ -4,15 +4,37 @@
 #include <tinysd/bits.h>
 #include <tinysd/commands.h>
 #include <tinysd/config.h>
+#include <tinysd/delay.h>
 
 #include <tinysd/card.h>
 
 // next_block when no read has come before
 #define NO_BLOCK UINT32_MAX
 
-// Status errors that mark a failed write, leaving out the range error an open write may raise
-static const uint32_t write_errors = TSD_STATUS_ADDRESS_ERROR | TSD_STATUS_BLOCK_LEN_ERROR | TSD_STATUS_WP_VIOLATION |
-                                     TSD_STATUS_CARD_ECC_FAILED | TSD_STATUS_CC_ERROR | TSD_STATUS_ERROR;
+// Longest wait for the card to finish a write, in milliseconds
+#define WRITE_TIMEOUT_MS 10000
+
+// Time the card may take to erase each block, in milliseconds, from the SD specification
+#define ERASE_TIMEOUT_PER_BLOCK_MS 250
+
+// Delay between CMD13 tries while the card is busy, in microseconds
+#define READY_DELAY_US 125
+
+// Status errors that mark a failed write
+#define WRITE_ERRORS            \
+  (TSD_STATUS_ADDRESS_ERROR |   \
+   TSD_STATUS_BLOCK_LEN_ERROR | \
+   TSD_STATUS_WP_VIOLATION |    \
+   TSD_STATUS_CARD_ECC_FAILED | \
+   TSD_STATUS_CC_ERROR |        \
+   TSD_STATUS_ERROR)
+
+// Status errors that mark a failed erase
+#define ERASE_ERRORS            \
+  (WRITE_ERRORS |               \
+   TSD_STATUS_ERASE_SEQ_ERROR | \
+   TSD_STATUS_ERASE_PARAM |     \
+   TSD_STATUS_WP_ERASE_SKIP)
 
 // Address a block by number on a high capacity card and by byte offset on the others
 static uint32_t block_address(struct tsd_card *card, uint32_t block)
@@ -61,25 +83,38 @@ static int transfer_blocks(struct tsd_card *card, void *buffer, uint32_t block, 
       ret = stop_ret;
 
     // Report an error the card flagged while it took the blocks of a write
-    if (ret == 0 && write && (status & write_errors))
+    if (ret == 0 && write && (status & WRITE_ERRORS))
       ret = TSD_ERR_CARD;
   }
 
   return ret;
 }
 
-// Ask the card for its status with CMD13 and report an error it flags
-static int check_status(struct tsd_card *card)
+// Poll the card status until it is ready for data
+static int wait_ready(struct tsd_card *card, uint32_t errors, uint64_t timeout_us)
 {
-  // Ask the card for its status
   uint32_t address = card->address << TSD_RCA_SHIFT;
-  uint32_t status  = 0;
-  int ret          = tsd_host_send_command(card->host, TSD_CMD_SEND_STATUS, address, TSD_RESPONSE_R1, &status);
-  if (ret < 0)
-    return ret;
+  for (uint64_t waited_us = 0; waited_us < timeout_us; waited_us += READY_DELAY_US) {
+    // Ask the card for its status
+    uint32_t status = 0;
+    int ret         = tsd_host_send_command(card->host, TSD_CMD_SEND_STATUS, address, TSD_RESPONSE_R1, &status);
+    if (ret < 0)
+      return ret;
 
-  // Report an error bit the card set
-  return status & write_errors ? TSD_ERR_CARD : 0;
+    // Report an error bit the card set
+    if (status & errors)
+      return TSD_ERR_CARD;
+
+    // Finish once the card is ready for data in the transfer state
+    uint32_t state = TSD_FIELD_GET(TSD_STATUS_CURRENT_STATE, status);
+    if ((status & TSD_STATUS_READY_FOR_DATA) && state == TSD_STATUS_STATE_TRAN)
+      return 0;
+
+    // Wait before asking again
+    tsd_delay_us(READY_DELAY_US);
+  }
+
+  return TSD_ERR_TIMEOUT;
 }
 
 // End an open read with CMD12, which has no busy after a read, leaving the card ready for another command
@@ -167,16 +202,52 @@ int tsd_card_write(struct tsd_card *card, const void *buffer, uint32_t block, ui
   // Forget where a read would follow on, since the write comes between
   card->next_block = NO_BLOCK;
 
-  // End an open read, since the card takes no other command while it sends
+  // End an open read
   int ret = stop_read(card);
   if (ret < 0)
     return ret;
 
-  // Write the blocks, then check the card's status for an error from programming them
+  // Write the blocks, then wait for the card to finish programming them
   ret = transfer_blocks(card, (void *)buffer, block, count, true);
   if (ret < 0)
     return ret;
-  return check_status(card);
+
+  return wait_ready(card, WRITE_ERRORS, WRITE_TIMEOUT_MS * 1000);
+}
+
+int tsd_card_erase(struct tsd_card *card, uint32_t block, uint32_t count)
+{
+  // Refuse an empty erase or one past the end of the card
+  if (count == 0 || block >= card->blocks || count > card->blocks - block)
+    return TSD_ERR_PARAM;
+
+  // Forget where a read would follow on, since the erase comes between
+  card->next_block = NO_BLOCK;
+
+  // End an open read
+  int ret = stop_read(card);
+  if (ret < 0)
+    return ret;
+
+  // Set the first block
+  uint32_t first = block_address(card, block);
+  ret            = tsd_host_send_command(card->host, TSD_CMD_ERASE_WR_BLK_START, first, TSD_RESPONSE_R1, NULL);
+  if (ret < 0)
+    return ret;
+
+  // Set the last block
+  uint32_t last = block_address(card, block + count - 1);
+  ret           = tsd_host_send_command(card->host, TSD_CMD_ERASE_WR_BLK_END, last, TSD_RESPONSE_R1, NULL);
+  if (ret < 0)
+    return ret;
+
+  // Erase them, taking an R1 since a long erase can outlast the host's busy wait
+  ret = tsd_host_send_command(card->host, TSD_CMD_ERASE, 0, TSD_RESPONSE_R1, NULL);
+  if (ret < 0)
+    return ret;
+
+  // Wait for the card to finish
+  return wait_ready(card, ERASE_ERRORS, (uint64_t)count * ERASE_TIMEOUT_PER_BLOCK_MS * 1000);
 }
 
 int tsd_card_sync(struct tsd_card *card)

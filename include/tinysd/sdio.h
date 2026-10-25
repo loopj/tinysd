@@ -127,7 +127,7 @@ struct tsd_sdio {
 int tsd_sdio_identify(struct tsd_sdio *card, struct tsd_host *host);
 
 /**
- * Bring a card up at a bus width and clock.
+ * Initialize a card at a bus width and clock.
  *
  * @param card the card
  * @param host the host the card sits on, started by the caller

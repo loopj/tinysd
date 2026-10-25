@@ -195,7 +195,7 @@ int tsd_card_init(struct tsd_card *card, struct tsd_host *host, uint8_t width, u
   if (ret < 0)
     return ret;
 
-  // Select the card by its address, taking an R1 since it has nothing to be busy with, like Linux and Zephyr
+  // Select the card by its address, taking an R1 since it has nothing to be busy with
   ret = tsd_host_send_command(card->host, TSD_CMD_SELECT_CARD, card->address << TSD_RCA_SHIFT, TSD_RESPONSE_R1, NULL);
   if (ret < 0)
     return ret;

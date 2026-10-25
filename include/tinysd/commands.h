@@ -70,6 +70,38 @@
 #define TSD_ACMD6_BUS_WIDTH_4BIT       0x2u
 
 /**
+ * Current state values in the card status, from Table 4-42 of the SD specification.
+ */
+enum tsd_status_state {
+  /** Idle State. */
+  TSD_STATUS_STATE_IDLE = 0,
+
+  /** Ready State. */
+  TSD_STATUS_STATE_READY = 1,
+
+  /** Identification State. */
+  TSD_STATUS_STATE_IDENT = 2,
+
+  /** Stand-by State. */
+  TSD_STATUS_STATE_STBY = 3,
+
+  /** Transfer State. */
+  TSD_STATUS_STATE_TRAN = 4,
+
+  /** Sending-data State. */
+  TSD_STATUS_STATE_DATA = 5,
+
+  /** Receive-data State. */
+  TSD_STATUS_STATE_RCV = 6,
+
+  /** Programming State. */
+  TSD_STATUS_STATE_PRG = 7,
+
+  /** Disconnect State. */
+  TSD_STATUS_STATE_DIS = 8,
+};
+
+/**
  * Command indexes, named as in the SD specification.
  */
 enum tsd_command_index {
@@ -117,6 +149,15 @@ enum tsd_command_index {
 
   /** Write blocks until CMD12. */
   TSD_CMD_WRITE_MULTIPLE_BLOCK = 25,
+
+  /** Set the first block to erase. */
+  TSD_CMD_ERASE_WR_BLK_START = 32,
+
+  /** Set the last block to erase. */
+  TSD_CMD_ERASE_WR_BLK_END = 33,
+
+  /** Erase the blocks CMD32 and CMD33 set. */
+  TSD_CMD_ERASE = 38,
 
   /** Read or write one register byte of an SDIO card. */
   TSD_CMD_IO_RW_DIRECT = 52,
