@@ -58,8 +58,42 @@ static int check_version(struct tsd_card *card, bool *version2)
   return 0;
 }
 
+// Decode the CSD fields the driver uses, the card's block count
+static int decode_csd(struct tsd_card *card, const uint32_t *csd)
+{
+  // Read the CSD structure version
+  uint32_t version = TSD_FIELD_GET(TSD_CSD_STRUCTURE, csd[0]);
+
+  // Count a version 2 CSD's size in units of 1024 blocks
+  if (version == TSD_CSD_VERSION_2) {
+    uint32_t size = TSD_FIELD_GET(TSD_CSD_V2_C_SIZE_HIGH, csd[1]) << 16 | TSD_FIELD_GET(TSD_CSD_V2_C_SIZE_LOW, csd[2]);
+    card->blocks  = (size + 1) * 1024;
+    return 0;
+  }
+
+  // Refuse any other structure, such as an SDUC card's version 3, since its size needs 64-bit block numbers
+  if (version != TSD_CSD_VERSION_1)
+    return TSD_ERR_COMMAND;
+
+  // Scale a version 1 CSD's size by its multiplier and block length
+  uint32_t size = TSD_FIELD_GET(TSD_CSD_V1_C_SIZE_HIGH, csd[1]) << 2 | TSD_FIELD_GET(TSD_CSD_V1_C_SIZE_LOW, csd[2]);
+  uint32_t multiplier   = TSD_FIELD_GET(TSD_CSD_V1_C_SIZE_MULT, csd[2]);
+  uint32_t block_length = TSD_FIELD_GET(TSD_CSD_V1_READ_BL_LEN, csd[1]);
+  card->blocks          = (size + 1) << (multiplier + block_length - 7);
+  return 0;
+}
+
+// Set 512-byte blocks on a standard capacity card, since its block length may start larger
+static int set_block_length(struct tsd_card *card)
+{
+  if (card->high_capacity)
+    return 0;
+
+  return tsd_host_send_command(card->host, TSD_CMD_SET_BLOCKLEN, TSD_CARD_BLOCK_SIZE, TSD_RESPONSE_R1, NULL);
+}
+
 // Repeat ACMD41 until the card reports ready, offering high capacity to a version 2 card
-static int power_up(struct tsd_card *card, bool version2)
+static int send_op_cond(struct tsd_card *card, bool version2)
 {
   uint32_t argument = TSD_OCR_VOLTAGE_WINDOW | (version2 ? TSD_OCR_CCS : 0);
   for (uint32_t waited_us = 0; waited_us < POWER_UP_TIMEOUT_MS * 1000; waited_us += POWER_UP_DELAY_US) {
@@ -95,27 +129,7 @@ static int read_capacity(struct tsd_card *card)
   if (ret < 0)
     return ret;
 
-  // Read the CSD structure version
-  const uint32_t *csd = command.response;
-  uint32_t version    = TSD_FIELD_GET(TSD_CSD_STRUCTURE, csd[0]);
-
-  // Count a version 2 CSD's size in units of 1024 blocks
-  if (version == TSD_CSD_VERSION_2) {
-    uint32_t size = TSD_FIELD_GET(TSD_CSD_V2_C_SIZE_HIGH, csd[1]) << 16 | TSD_FIELD_GET(TSD_CSD_V2_C_SIZE_LOW, csd[2]);
-    card->blocks  = (size + 1) * 1024;
-    return 0;
-  }
-
-  // Refuse any other structure, such as an SDUC card's version 3, since its size needs 64-bit block numbers
-  if (version != TSD_CSD_VERSION_1)
-    return TSD_ERR_COMMAND;
-
-  // Scale a version 1 CSD's size by its multiplier and block length
-  uint32_t size = TSD_FIELD_GET(TSD_CSD_V1_C_SIZE_HIGH, csd[1]) << 2 | TSD_FIELD_GET(TSD_CSD_V1_C_SIZE_LOW, csd[2]);
-  uint32_t multiplier   = TSD_FIELD_GET(TSD_CSD_V1_C_SIZE_MULT, csd[2]);
-  uint32_t block_length = TSD_FIELD_GET(TSD_CSD_V1_READ_BL_LEN, csd[1]);
-  card->blocks          = (size + 1) << (multiplier + block_length - 7);
-  return 0;
+  return decode_csd(card, command.response);
 }
 
 // Switch the card to high speed with CMD6
@@ -176,7 +190,7 @@ int tsd_card_init(struct tsd_card *card, struct tsd_host *host, uint8_t width, u
     return ret;
 
   // Power the card up with ACMD41
-  ret = power_up(card, version2);
+  ret = send_op_cond(card, version2);
   if (ret < 0)
     return ret;
 
@@ -200,12 +214,10 @@ int tsd_card_init(struct tsd_card *card, struct tsd_host *host, uint8_t width, u
   if (ret < 0)
     return ret;
 
-  // Set 512-byte blocks on a standard capacity card, since its block length may start larger
-  if (!card->high_capacity) {
-    ret = tsd_host_send_command(card->host, TSD_CMD_SET_BLOCKLEN, TSD_CARD_BLOCK_SIZE, TSD_RESPONSE_R1, NULL);
-    if (ret < 0)
-      return ret;
-  }
+  // Set 512-byte blocks on a standard capacity card
+  ret = set_block_length(card);
+  if (ret < 0)
+    return ret;
 
   // Switch the card and then the host to 4 bits when asked
   if (width == 4) {
