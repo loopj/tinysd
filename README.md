@@ -5,6 +5,8 @@
 
 Dependency-free C library for SD cards and SDIO on embedded and bare-metal systems.
 
+![Logic Analyzer Screenshot](images/logic-analyzer.png)
+
 ## Features
 
 - C implementation, no external dependencies
