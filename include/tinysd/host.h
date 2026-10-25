@@ -168,14 +168,12 @@ static inline int tsd_host_send_command(struct tsd_host *host, uint8_t index, ui
     .response_type = response_type,
   };
   int ret = tsd_host_request(host, &command, NULL);
-  if (ret < 0)
-    return ret;
 
-  // Return the response word when asked for
+  // Return the response word when asked for, even after an error, since it may say why
   if (response)
     *response = command.response[0];
 
-  return 0;
+  return ret;
 }
 
 /**
