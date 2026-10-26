@@ -116,6 +116,11 @@ int tsd_sdio_set_block_size(struct tsd_sdio *card, uint8_t function, uint16_t bl
   if (function > FUNCTION_MAX)
     return TSD_ERR_PARAM;
 
+  // Refuse a size past the function's limit from the CIS
+  uint16_t limit = card->max_block_size[function];
+  if (limit && block_size > limit)
+    return TSD_ERR_PARAM;
+
   // Find the size register, which function 0 keeps in the CCCR and the others in their FBR
   uint32_t address = function ? TSD_SDIO_FBR_BASE(function) + TSD_SDIO_FBR_BLOCK_SIZE : TSD_SDIO_CCCR_FN0_BLOCK_SIZE;
 
@@ -237,9 +242,17 @@ int tsd_sdio_transfer(struct tsd_sdio *card, uint8_t function, uint32_t address,
       chunk            = blocks * block_size;
       chunk_block_size = block_size;
     } else {
+      // Move at most 512 bytes
       chunk = remaining < BYTE_MODE_MAX ? remaining : BYTE_MODE_MAX;
+
+      // Move no more than a block
       if (block_size && chunk > block_size)
         chunk = block_size;
+
+      // Move no more than the function's limit from its CIS
+      uint16_t limit = card->max_block_size[function];
+      if (limit && chunk > limit)
+        chunk = limit;
     }
 
     // Run it at the address the transfer has reached, counting what it moved
