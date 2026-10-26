@@ -7,20 +7,28 @@
 
 #include <tinysd/sdio.h>
 
-// Bytes ahead of each tuple's body, the code and the link
-#define TUPLE_HEADER_LEN 2
+// Bytes of the common CIS pointer
+#define COMMON_CIS_POINTER_LEN 3
 
 // End of the CIS area, past which no tuple lies
 #define CIS_AREA_END 0x18000u
+
+// Bytes ahead of each tuple's body, the code and the link
+#define TUPLE_HEADER_LEN 2
 
 // Tuple link that marks the last tuple of the chain
 #define CIS_LINK_END 0xff
 
 // Bytes of the manufacturer tuple read, two little-endian 16-bit ids
-#define MANUFACTURER_TUPLE_LEN 4
+#define MANFID_TUPLE_LEN 4
 
-// Bytes of the common CIS pointer
-#define COMMON_CIS_POINTER_LEN 3
+// Function 0 extension tuple fields, from Table 16-6 of the SDIO specification
+#define TPLFE_TYPE_FUNCTION_0       0x00
+#define TPLFE_MAX_TRAN_SPEED_OFFSET 3
+
+// TPLFE_MAX_TRAN_SPEED fields, from Section 16.7.3 of the SDIO specification
+#define TRAN_SPEED_UNIT       TSD_BITS(2, 0)
+#define TRAN_SPEED_TIME_VALUE TSD_BITS(6, 3)
 
 // Longest wait for the card to power up, in milliseconds
 #define POWER_UP_TIMEOUT_MS 1000
@@ -37,10 +45,16 @@
 // Fastest clock in default speed, in kHz
 #define DEFAULT_SPEED_MAX_KHZ 25000
 
-// Record the manufacturer ids from the common CIS at address, walking its tuples to the end of the chain
-static int read_manufacturer(struct tsd_sdio *card, uint32_t address)
+// Units of TPLFE_MAX_TRAN_SPEED in kHz, with 0 for a reserved unit
+static const uint32_t tran_speed_units_khz[8] = {100, 1000, 10000, 100000, 0, 0, 0, 0};
+
+// Time values of TPLFE_MAX_TRAN_SPEED in tenths, with 0 for the reserved value
+static const uint8_t tran_speed_time_values[16] = {0, 10, 12, 13, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 70, 80};
+
+// Record the fields the driver uses from the common CIS at address, walking its tuples to the end of the chain
+static int read_common_cis(struct tsd_sdio *card, uint32_t address)
 {
-  // Walk until the end of the chain or of the CIS area, either leaving the ids at 0
+  // Walk until the end of the chain or of the CIS area, leaving any field not found at 0
   while (address < CIS_AREA_END) {
     // Read the tuple's code and stop at the end of the chain
     uint8_t code;
@@ -63,16 +77,35 @@ static int read_manufacturer(struct tsd_sdio *card, uint32_t address)
       return ret;
 
     // Take the ids from the manufacturer tuple, two little-endian 16-bit values
-    if (code == TSD_SDIO_CISTPL_MANFID && link >= MANUFACTURER_TUPLE_LEN) {
-      uint8_t bytes[MANUFACTURER_TUPLE_LEN];
-      for (int i = 0; i < MANUFACTURER_TUPLE_LEN; i++) {
+    if (code == TSD_SDIO_CISTPL_MANFID && link >= MANFID_TUPLE_LEN) {
+      uint8_t bytes[MANFID_TUPLE_LEN];
+      for (int i = 0; i < MANFID_TUPLE_LEN; i++) {
         ret = tsd_sdio_read_f0(card, address + TUPLE_HEADER_LEN + i, &bytes[i]);
         if (ret < 0)
           return ret;
       }
       card->cis.manufacturer_id = (uint16_t)(bytes[0] | (bytes[1] << 8));
       card->cis.card_id         = (uint16_t)(bytes[2] | (bytes[3] << 8));
-      return 0;
+    }
+
+    // Take the fastest clock from function 0's extension tuple
+    if (code == TSD_SDIO_CISTPL_FUNCE && link > TPLFE_MAX_TRAN_SPEED_OFFSET) {
+      // Read the extension type and the transfer speed
+      uint8_t type;
+      uint8_t speed;
+      ret = tsd_sdio_read_f0(card, address + TUPLE_HEADER_LEN, &type);
+      if (ret < 0)
+        return ret;
+      ret = tsd_sdio_read_f0(card, address + TUPLE_HEADER_LEN + TPLFE_MAX_TRAN_SPEED_OFFSET, &speed);
+      if (ret < 0)
+        return ret;
+
+      // Decode the speed for function 0
+      if (type == TPLFE_TYPE_FUNCTION_0) {
+        uint32_t unit_khz       = tran_speed_units_khz[TSD_FIELD_GET(TRAN_SPEED_UNIT, speed)];
+        uint32_t time_value     = tran_speed_time_values[TSD_FIELD_GET(TRAN_SPEED_TIME_VALUE, speed)];
+        card->cis.max_clock_khz = unit_khz * time_value / 10;
+      }
     }
 
     // Stop after a tuple marked last by its FFh link, once its body has been checked
@@ -127,14 +160,15 @@ static int read_common_cis_pointer(struct tsd_sdio *card, uint32_t *address)
   return 0;
 }
 
-// Enumerate the card slowly on one data line, select it and read its ids
+// Enumerate the card slowly on one data line, select it and read its common CIS
 static int enumerate_card(struct tsd_sdio *card, struct tsd_host *host)
 {
-  // Take the host and forget the address and ids of an earlier enumeration
+  // Take the host and forget the address and CIS fields of an earlier enumeration
   card->host                = host;
   card->address             = 0;
   card->cis.manufacturer_id = 0;
   card->cis.card_id         = 0;
+  card->cis.max_clock_khz   = 0;
 
   // Start at the enumeration clock on one data line, whatever the card was doing before
   int ret = tsd_host_set_clock(host, ENUMERATION_CLOCK_KHZ);
@@ -166,12 +200,12 @@ static int enumerate_card(struct tsd_sdio *card, struct tsd_host *host)
   if (ret < 0)
     return ret;
 
-  // Read the manufacturer from the common CIS
+  // Read the fields the driver uses from the common CIS
   uint32_t common_cis;
   ret = read_common_cis_pointer(card, &common_cis);
   if (ret < 0)
     return ret;
-  return read_manufacturer(card, common_cis);
+  return read_common_cis(card, common_cis);
 }
 
 // Switch the card and then the host between 1-bit and 4-bit mode
@@ -258,6 +292,10 @@ int tsd_sdio_init(struct tsd_sdio *card, struct tsd_host *host, uint8_t width, u
   // Run a clock above default speed only once the card switches to high speed
   if (clock_khz > DEFAULT_SPEED_MAX_KHZ && !switch_to_high_speed(card))
     clock_khz = DEFAULT_SPEED_MAX_KHZ;
+
+  // Hold a card in default speed to a lower limit from its CIS, such as a low speed card's
+  if (clock_khz <= DEFAULT_SPEED_MAX_KHZ && card->cis.max_clock_khz && clock_khz > card->cis.max_clock_khz)
+    clock_khz = card->cis.max_clock_khz;
 
   return tsd_host_set_clock(card->host, clock_khz);
 }

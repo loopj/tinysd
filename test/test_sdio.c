@@ -151,6 +151,20 @@ static void test_high_speed(void)
   TEST_ASSERT_EQUAL_UINT32(25000, host.clock_khz);
 }
 
+// Test that a low speed card is held to the 400 kHz its CIS gives
+static void test_low_speed(void)
+{
+  uint8_t cis[] = {
+    0x22, 0x04, 0x00, 0x00, 0x02, 0x48, // CISTPL_FUNCE for function 0, 512-byte blocks at 400 kb/s
+    0xff,                               // CISTPL_END
+  };
+  script_cis(cis, sizeof(cis));
+
+  TEST_ASSERT_EQUAL(0, tsd_sdio_init(&card, &host.base, 1, 25000));
+  TEST_ASSERT_EQUAL_UINT32(400, card.cis.max_clock_khz);
+  TEST_ASSERT_EQUAL_UINT32(400, host.clock_khz);
+}
+
 int main(int argc, char **argv)
 {
   UNITY_BEGIN();
@@ -162,6 +176,7 @@ int main(int argc, char **argv)
   RUN_TEST(test_argument_out_of_range);
   RUN_TEST(test_response_flags);
   RUN_TEST(test_high_speed);
+  RUN_TEST(test_low_speed);
 
   return UNITY_END();
 }

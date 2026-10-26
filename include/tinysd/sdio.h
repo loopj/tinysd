@@ -86,6 +86,7 @@
 /** CIS tuple codes, from Table 16-2 of the SDIO specification. */
 #define TSD_SDIO_CISTPL_NULL                 0x00
 #define TSD_SDIO_CISTPL_MANFID               0x20
+#define TSD_SDIO_CISTPL_FUNCE                0x22
 #define TSD_SDIO_CISTPL_END                  0xff
 
 /** Address of a function's basic registers in function 0. */
@@ -109,6 +110,9 @@ struct tsd_sdio_cis {
 
   /** Card id, or 0 when the CIS has none. */
   uint16_t card_id;
+
+  /** Fastest default speed clock in kHz, or 0 when the CIS has none. */
+  uint32_t max_clock_khz;
 };
 
 /**
@@ -140,7 +144,7 @@ int tsd_sdio_identify(struct tsd_host *host, struct tsd_sdio_cis *cis);
  * @param card the card
  * @param host the host the card sits on, started by the caller
  * @param width the bus width, 1 or 4
- * @param clock_khz the highest clock in kHz, held to 25000 for a card without high speed
+ * @param clock_khz the highest clock in kHz, held lower when the card cannot run it
  * @return 0 or a negative tsd_error
  */
 int tsd_sdio_init(struct tsd_sdio *card, struct tsd_host *host, uint8_t width, uint32_t clock_khz);
