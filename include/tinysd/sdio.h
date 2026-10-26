@@ -101,6 +101,17 @@
 #define TSD_SDIO_FBR_BLOCK_SIZE              0x10
 
 /**
+ * Fields from an SDIO card's common CIS.
+ */
+struct tsd_sdio_cis {
+  /** Manufacturer id, or 0 when the CIS has none. */
+  uint16_t manufacturer_id;
+
+  /** Card id, or 0 when the CIS has none. */
+  uint16_t card_id;
+};
+
+/**
  * An SDIO card.
  */
 struct tsd_sdio {
@@ -110,21 +121,18 @@ struct tsd_sdio {
   /** Relative card address, 0 until the card has one. */
   uint32_t address;
 
-  /** Manufacturer id from the CIS, or 0 when it has none. */
-  uint16_t manufacturer_id;
-
-  /** Card id from the CIS, or 0 when it has none. */
-  uint16_t card_id;
+  /** Fields from the card's common CIS. */
+  struct tsd_sdio_cis cis;
 };
 
 /**
  * Read a card's ids, then reset its I/O, for a card another driver may own.
  *
- * @param card the card, which receives its ids
  * @param host the host the card sits on, started by the caller, who also releases it
+ * @param cis receives the fields from the card's common CIS
  * @return 0 or a negative tsd_error
  */
-int tsd_sdio_identify(struct tsd_sdio *card, struct tsd_host *host);
+int tsd_sdio_identify(struct tsd_host *host, struct tsd_sdio_cis *cis);
 
 /**
  * Initialize a card at a bus width and clock.

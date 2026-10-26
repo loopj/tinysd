@@ -125,7 +125,7 @@ ret = tsd_sdio_read_byte(&sdio, 1, 0x00, &value);
 ret = tsd_sdio_transfer(&sdio, 1, 0x100, false, buffer, sizeof(buffer), 64, NULL);
 ```
 
-After init, the ids from the card's CIS are in `sdio.manufacturer_id` and `sdio.card_id`. To read them without bringing the card up, call `tsd_sdio_identify`.
+After init, the ids from the card's CIS are in `sdio.cis`. To read them without bringing the card up, call `tsd_sdio_identify`, which fills in a `struct tsd_sdio_cis` and leaves the card for another driver.
 
 ## Running from RAM
 

@@ -70,8 +70,8 @@ static int read_manufacturer(struct tsd_sdio *card, uint32_t address)
         if (ret < 0)
           return ret;
       }
-      card->manufacturer_id = (uint16_t)(bytes[0] | (bytes[1] << 8));
-      card->card_id         = (uint16_t)(bytes[2] | (bytes[3] << 8));
+      card->cis.manufacturer_id = (uint16_t)(bytes[0] | (bytes[1] << 8));
+      card->cis.card_id         = (uint16_t)(bytes[2] | (bytes[3] << 8));
       return 0;
     }
 
@@ -131,10 +131,10 @@ static int read_common_cis_pointer(struct tsd_sdio *card, uint32_t *address)
 static int enumerate_card(struct tsd_sdio *card, struct tsd_host *host)
 {
   // Take the host and forget the address and ids of an earlier enumeration
-  card->host            = host;
-  card->address         = 0;
-  card->manufacturer_id = 0;
-  card->card_id         = 0;
+  card->host                = host;
+  card->address             = 0;
+  card->cis.manufacturer_id = 0;
+  card->cis.card_id         = 0;
 
   // Start at the enumeration clock on one data line, whatever the card was doing before
   int ret = tsd_host_set_clock(host, ENUMERATION_CLOCK_KHZ);
@@ -225,14 +225,17 @@ static void reset_card(struct tsd_sdio *card)
     tsd_sdio_write_f0(card, TSD_SDIO_CCCR_IO_ABORT, TSD_SDIO_IO_ABORT_RES);
 }
 
-int tsd_sdio_identify(struct tsd_sdio *card, struct tsd_host *host)
+int tsd_sdio_identify(struct tsd_host *host, struct tsd_sdio_cis *cis)
 {
+  struct tsd_sdio card = {0};
+
   // Enumerate the card to read its ids
-  int ret = enumerate_card(card, host);
+  int ret = enumerate_card(&card, host);
 
   // Leave the card as found for another driver, with its I/O reset and no CMD0
-  reset_card(card);
+  reset_card(&card);
 
+  *cis = card.cis;
   return ret;
 }
 

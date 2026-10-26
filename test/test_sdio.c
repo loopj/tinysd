@@ -63,8 +63,23 @@ static void test_manufacturer_from_cis(void)
   script_cis(cis, sizeof(cis));
 
   init_card();
-  TEST_ASSERT_EQUAL_HEX16(0x0089, card.manufacturer_id);
-  TEST_ASSERT_EQUAL_HEX16(0x1234, card.card_id);
+  TEST_ASSERT_EQUAL_HEX16(0x0089, card.cis.manufacturer_id);
+  TEST_ASSERT_EQUAL_HEX16(0x1234, card.cis.card_id);
+}
+
+// Test that identify returns the ids from the common CIS
+static void test_identify(void)
+{
+  uint8_t cis[] = {
+    0x20, 0x04, 0x89, 0x00, 0x34, 0x12, // CISTPL_MANFID, JEDEC code 89h as 0089h, card 1234h
+    0xff,                               // CISTPL_END
+  };
+  script_cis(cis, sizeof(cis));
+
+  struct tsd_sdio_cis fields;
+  TEST_ASSERT_EQUAL(0, tsd_sdio_identify(&host.base, &fields));
+  TEST_ASSERT_EQUAL_HEX16(0x0089, fields.manufacturer_id);
+  TEST_ASSERT_EQUAL_HEX16(0x1234, fields.card_id);
 }
 
 // Test that a transfer moves whole blocks in block mode, then the rest in byte mode from where they ended
@@ -141,6 +156,7 @@ int main(int argc, char **argv)
   UNITY_BEGIN();
 
   RUN_TEST(test_manufacturer_from_cis);
+  RUN_TEST(test_identify);
   RUN_TEST(test_transfer_split);
   RUN_TEST(test_byte_mode_512);
   RUN_TEST(test_argument_out_of_range);
