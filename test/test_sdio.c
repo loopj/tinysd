@@ -14,6 +14,9 @@
 // Where the tests put the common CIS in function 0
 #define COMMON_CIS 0x1000
 
+// Where the tests put function 1's CIS in function 0
+#define FUNCTION_CIS 0x1100
+
 // The card under test
 static struct tsd_sdio card;
 
@@ -21,11 +24,25 @@ static struct tsd_sdio card;
 static uint8_t buffer[1024];
 
 // Put a common CIS in function 0 and point the CCCR at it
-static void script_cis(const uint8_t *cis, size_t len)
+static void fake_common_cis(const uint8_t *cis, size_t len)
 {
   memcpy(&host.f0[COMMON_CIS], cis, len);
   host.f0[TSD_SDIO_CCCR_COMMON_CIS_POINTER]     = (uint8_t)COMMON_CIS;
   host.f0[TSD_SDIO_CCCR_COMMON_CIS_POINTER + 1] = (uint8_t)(COMMON_CIS >> 8);
+}
+
+// Give the card one function, with a CIS that limits it to 64-byte blocks
+static void fake_function(void)
+{
+  uint8_t cis[] = {
+    0x22, 0x0e, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // CISTPL_FUNCE for function 1
+    0x40, 0x00,                                                                         // TPLFE_MAX_BLK_SIZE of 64
+    0xff,                                                                               // CISTPL_END
+  };
+  memcpy(&host.f0[FUNCTION_CIS], cis, sizeof(cis));
+  host.f0[TSD_SDIO_FBR_BASE(1) + TSD_SDIO_FBR_CIS_POINTER]     = (uint8_t)FUNCTION_CIS;
+  host.f0[TSD_SDIO_FBR_BASE(1) + TSD_SDIO_FBR_CIS_POINTER + 1] = (uint8_t)(FUNCTION_CIS >> 8);
+  host.replies[TSD_CMD_IO_SEND_OP_COND].response[0] |= TSD_FIELD_PREP(TSD_SDIO_R4_FUNCTIONS, 1);
 }
 
 // Bring the card up on one data line
@@ -45,7 +62,7 @@ void setUp(void)
 
   // Give it a common CIS that holds only the end tuple
   uint8_t cis[] = {0xff};
-  script_cis(cis, sizeof(cis));
+  fake_common_cis(cis, sizeof(cis));
 }
 
 void tearDown(void)
@@ -60,7 +77,7 @@ static void test_manufacturer_from_cis(void)
     0x20, 0x04, 0x89, 0x00, 0x34, 0x12, // CISTPL_MANFID, JEDEC code 89h as 0089h, card 1234h
     0xff,                               // CISTPL_END
   };
-  script_cis(cis, sizeof(cis));
+  fake_common_cis(cis, sizeof(cis));
 
   init_card();
   TEST_ASSERT_EQUAL_HEX16(0x0089, card.cis.manufacturer_id);
@@ -74,7 +91,7 @@ static void test_identify(void)
     0x20, 0x04, 0x89, 0x00, 0x34, 0x12, // CISTPL_MANFID, JEDEC code 89h as 0089h, card 1234h
     0xff,                               // CISTPL_END
   };
-  script_cis(cis, sizeof(cis));
+  fake_common_cis(cis, sizeof(cis));
 
   struct tsd_sdio_cis fields;
   TEST_ASSERT_EQUAL(0, tsd_sdio_identify(&host.base, &fields));
@@ -158,11 +175,31 @@ static void test_low_speed(void)
     0x22, 0x04, 0x00, 0x00, 0x02, 0x48, // CISTPL_FUNCE for function 0, 512-byte blocks at 400 kb/s
     0xff,                               // CISTPL_END
   };
-  script_cis(cis, sizeof(cis));
+  fake_common_cis(cis, sizeof(cis));
 
   TEST_ASSERT_EQUAL(0, tsd_sdio_init(&card, &host.base, 1, 25000));
+  TEST_ASSERT_EQUAL_UINT16(512, card.max_block_size[0]);
   TEST_ASSERT_EQUAL_UINT32(400, card.cis.max_clock_khz);
   TEST_ASSERT_EQUAL_UINT32(400, host.clock_khz);
+}
+
+// Test that a block size past a function's limit is refused
+static void test_block_size_limit(void)
+{
+  fake_function();
+  init_card();
+
+  TEST_ASSERT_EQUAL(TSD_ERR_PARAM, tsd_sdio_set_block_size(&card, 1, 128));
+}
+
+// Test that a byte mode transfer moves no more than a function's limit at once
+static void test_byte_mode_limit(void)
+{
+  fake_function();
+  init_card();
+
+  TEST_ASSERT_EQUAL(0, tsd_sdio_transfer(&card, 1, 0, false, buffer, 128, 0, NULL));
+  TEST_ASSERT_EQUAL_UINT32(64, TSD_FIELD_GET(TSD_SDIO_ARG_COUNT, harness_find(TSD_CMD_IO_RW_EXTENDED)->argument));
 }
 
 int main(int argc, char **argv)
@@ -177,6 +214,8 @@ int main(int argc, char **argv)
   RUN_TEST(test_response_flags);
   RUN_TEST(test_high_speed);
   RUN_TEST(test_low_speed);
+  RUN_TEST(test_block_size_limit);
+  RUN_TEST(test_byte_mode_limit);
 
   return UNITY_END();
 }

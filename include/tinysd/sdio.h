@@ -127,6 +127,12 @@ struct tsd_sdio {
 
   /** Fields from the card's common CIS. */
   struct tsd_sdio_cis cis;
+
+  /** Number of I/O functions, not counting function 0. */
+  uint8_t functions;
+
+  /** Each function's largest block size from the CIS, or 0 when it has none. */
+  uint16_t max_block_size[8];
 };
 
 /**
