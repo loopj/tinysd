@@ -183,6 +183,20 @@ static void test_low_speed(void)
   TEST_ASSERT_EQUAL_UINT32(400, host.clock_khz);
 }
 
+// Test that a low speed card stays on one data line unless it supports four
+static void test_low_speed_width(void)
+{
+  uint8_t *interface = &host.f0[TSD_SDIO_CCCR_BUS_INTERFACE_CONTROL];
+
+  host.f0[TSD_SDIO_CCCR_CARD_CAPABILITY] = TSD_SDIO_CAPABILITY_LSC;
+  TEST_ASSERT_EQUAL(0, tsd_sdio_init(&card, &host.base, 4, 400));
+  TEST_ASSERT_EQUAL(TSD_SDIO_BUS_WIDTH_1BIT, TSD_FIELD_GET(TSD_SDIO_BUS_WIDTH, *interface));
+
+  host.f0[TSD_SDIO_CCCR_CARD_CAPABILITY] = TSD_SDIO_CAPABILITY_LSC | TSD_SDIO_CAPABILITY_4BLS;
+  TEST_ASSERT_EQUAL(0, tsd_sdio_init(&card, &host.base, 4, 400));
+  TEST_ASSERT_EQUAL(TSD_SDIO_BUS_WIDTH_4BIT, TSD_FIELD_GET(TSD_SDIO_BUS_WIDTH, *interface));
+}
+
 // Test that a block size past a function's limit is refused
 static void test_block_size_limit(void)
 {
@@ -214,6 +228,7 @@ int main(int argc, char **argv)
   RUN_TEST(test_response_flags);
   RUN_TEST(test_high_speed);
   RUN_TEST(test_low_speed);
+  RUN_TEST(test_low_speed_width);
   RUN_TEST(test_block_size_limit);
   RUN_TEST(test_byte_mode_limit);
 

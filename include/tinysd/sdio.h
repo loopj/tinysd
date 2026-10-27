@@ -79,6 +79,10 @@
 #define TSD_SDIO_BUS_WIDTH_4BIT              2
 #define TSD_SDIO_BUS_WIDTH_8BIT              3
 
+/** Card capability register fields. */
+#define TSD_SDIO_CAPABILITY_4BLS             TSD_BIT(7)
+#define TSD_SDIO_CAPABILITY_LSC              TSD_BIT(6)
+
 /** Bus speed select register fields. */
 #define TSD_SDIO_SPEED_EHS                   TSD_BIT(1)
 #define TSD_SDIO_SPEED_SHS                   TSD_BIT(0)
@@ -149,7 +153,7 @@ int tsd_sdio_identify(struct tsd_host *host, struct tsd_sdio_cis *cis);
  *
  * @param card the card
  * @param host the host the card sits on, started by the caller
- * @param width the bus width, 1 or 4
+ * @param width the bus width the host can run, 1 or 4
  * @param clock_khz the highest clock in kHz, held lower when the card cannot run it
  * @return 0 or a negative tsd_error
  */

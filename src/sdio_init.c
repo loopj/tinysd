@@ -227,13 +227,28 @@ static int enumerate_card(struct tsd_sdio *card, struct tsd_host *host)
 // Switch the card and then the host between 1-bit and 4-bit mode
 static int set_bus_width(struct tsd_sdio *card, uint8_t width)
 {
-  // Read the bus interface control register and set its width field
-  uint8_t interface;
-  int ret = tsd_sdio_read_f0(card, TSD_SDIO_CCCR_BUS_INTERFACE_CONTROL, &interface);
+  // Read the card capability register
+  uint8_t capability;
+  int ret = tsd_sdio_read_f0(card, TSD_SDIO_CCCR_CARD_CAPABILITY, &capability);
   if (ret < 0)
     return ret;
-  interface = (interface & ~TSD_SDIO_BUS_WIDTH) |
-              TSD_FIELD_PREP(TSD_SDIO_BUS_WIDTH, width == 4 ? TSD_SDIO_BUS_WIDTH_4BIT : TSD_SDIO_BUS_WIDTH_1BIT);
+
+  // Keep a low speed card on one data line unless it supports four
+  if ((capability & TSD_SDIO_CAPABILITY_LSC) && !(capability & TSD_SDIO_CAPABILITY_4BLS))
+    width = 1;
+
+  // Pick the width field's value
+  uint8_t field = TSD_SDIO_BUS_WIDTH_1BIT;
+  if (width == 4)
+    field = TSD_SDIO_BUS_WIDTH_4BIT;
+
+  // Read the bus interface control register and set its width field
+  uint8_t interface;
+  ret = tsd_sdio_read_f0(card, TSD_SDIO_CCCR_BUS_INTERFACE_CONTROL, &interface);
+  if (ret < 0)
+    return ret;
+  interface &= ~TSD_SDIO_BUS_WIDTH;
+  interface |= TSD_FIELD_PREP(TSD_SDIO_BUS_WIDTH, field);
 
   // Switch the card first, so it is listening on four lines when the host starts driving them
   ret = tsd_sdio_write_f0(card, TSD_SDIO_CCCR_BUS_INTERFACE_CONTROL, interface);
