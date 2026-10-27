@@ -809,20 +809,3 @@ int tsd_sdhci_init(struct tsd_sdhci *sdhci, struct tsd_sdhci_config config)
 
   return 0;
 }
-
-void tsd_sdhci_deinit(struct tsd_sdhci *sdhci)
-{
-  // Reset the whole controller, which clears the clock, the bus power, the host control and the interrupt enables
-  reset_controller(sdhci, RESET_ALL);
-  sdhci->card_interrupt = false;
-
-  // Write them again for a controller that kept any, and clear every pending status
-  write16(sdhci, REG_CLOCK, 0);
-  write8(sdhci, REG_POWER, 0);
-  write8(sdhci, REG_CTRL, 0);
-  write16(sdhci, REG_INT_ENABLE, 0);
-  write16(sdhci, REG_INT_ENABLE + 2, 0);
-  write16(sdhci, REG_INT_SIGNAL, 0);
-  write16(sdhci, REG_INT_SIGNAL + 2, 0);
-  write32(sdhci, REG_INT_STATUS, INT_ALL);
-}
