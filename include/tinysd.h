@@ -9,5 +9,5 @@
 #include <tinysd/errors.h>
 #include <tinysd/frame.h>
 #include <tinysd/host.h>
-#include <tinysd/sdhci.h>
+#include <tinysd/host/sdhci.h>
 #include <tinysd/sdio.h>

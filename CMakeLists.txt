@@ -16,7 +16,7 @@ target_include_directories(tinysd_sdio INTERFACE include)
 
 # SDHCI host driver target
 add_library(tinysd_sdhci INTERFACE)
-target_sources(tinysd_sdhci INTERFACE src/sdhci.c)
+target_sources(tinysd_sdhci INTERFACE src/host/sdhci.c)
 target_include_directories(tinysd_sdhci INTERFACE include)
 
 # Frame and CRC helpers target, for software hosts

@@ -3,7 +3,7 @@
 #include <tinysd/bits.h>
 #include <tinysd/delay.h>
 
-#include <tinysd/sdhci.h>
+#include <tinysd/host/sdhci.h>
 
 // Every bit of the normal and error interrupt status registers
 #define INT_ALL 0xffffffffu
