@@ -53,10 +53,3 @@ struct tsd_sdhci {
  * @return 0 or a negative tsd_error
  */
 int tsd_sdhci_init(struct tsd_sdhci *sdhci, struct tsd_sdhci_config config);
-
-/**
- * Deinitialize an SDHCI host.
- *
- * @param sdhci the controller
- */
-void tsd_sdhci_deinit(struct tsd_sdhci *sdhci);
