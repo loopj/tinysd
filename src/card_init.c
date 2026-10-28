@@ -47,6 +47,10 @@ static int check_version(struct tsd_card *card, bool *version2)
   *version2 = false;
   if (ret == TSD_ERR_TIMEOUT)
     return 0;
+
+  // Take an illegal command answer in SPI mode as a version 1 card too
+  if (ret == TSD_ERR_COMMAND && card->host->api->spi && (reply & TSD_SPI_R1_ILLEGAL_COMMAND))
+    return 0;
   if (ret < 0)
     return ret;
 
@@ -93,7 +97,7 @@ static int set_block_length(struct tsd_card *card)
 }
 
 // Repeat ACMD41 until the card reports ready, offering high capacity to a version 2 card
-static int send_op_cond(struct tsd_card *card, bool version2)
+static int send_op_cond_sd(struct tsd_card *card, bool version2)
 {
   uint32_t argument = TSD_OCR_VOLTAGE_WINDOW | (version2 ? TSD_OCR_CCS : 0);
   for (uint32_t waited_us = 0; waited_us < POWER_UP_TIMEOUT_MS * 1000; waited_us += POWER_UP_DELAY_US) {
@@ -117,7 +121,7 @@ static int send_op_cond(struct tsd_card *card, bool version2)
 }
 
 // Read the card's CSD with CMD9 and count the blocks it holds
-static int read_capacity(struct tsd_card *card)
+static int read_capacity_sd(struct tsd_card *card)
 {
   // Ask the card for its CSD
   struct tsd_command command = {
@@ -155,31 +159,11 @@ static bool switch_to_high_speed(struct tsd_card *card)
          TSD_SWITCH_FUNCTION_HIGH_SPEED;
 }
 
-int tsd_card_init(struct tsd_card *card, struct tsd_host *host, uint8_t width, uint32_t clock_khz)
+// Initialize the card in SD mode, following Figure 4-2 of the SD specification
+static int init_sd(struct tsd_card *card, uint8_t width, uint32_t clock_khz)
 {
-  // Refuse a width the bus does not have
-  if (width != 1 && width != 4)
-    return TSD_ERR_PARAM;
-
-  // Take the host and start from no address and no read, as a standard capacity card
-  card->host          = host;
-  card->address       = 0;
-  card->high_capacity = false;
-  card->blocks        = 0;
-  card->reading       = false;
-  card->next_block    = UINT32_MAX;
-
-  // Start at the identification clock on one data line
-  int ret = tsd_host_set_clock(card->host, IDENTIFICATION_CLOCK_KHZ);
-  if (ret < 0)
-    return ret;
-  tsd_host_set_bus_width(card->host, 1);
-
-  // Let the clock run before the first command
-  tsd_delay_us(FIRST_COMMAND_DELAY_US);
-
   // Reset the card to idle
-  ret = tsd_host_send_command(card->host, TSD_CMD_GO_IDLE_STATE, 0, TSD_RESPONSE_NONE, NULL);
+  int ret = tsd_host_send_command(card->host, TSD_CMD_GO_IDLE_STATE, 0, TSD_RESPONSE_NONE, NULL);
   if (ret < 0)
     return ret;
 
@@ -190,7 +174,7 @@ int tsd_card_init(struct tsd_card *card, struct tsd_host *host, uint8_t width, u
     return ret;
 
   // Power the card up with ACMD41
-  ret = send_op_cond(card, version2);
+  ret = send_op_cond_sd(card, version2);
   if (ret < 0)
     return ret;
 
@@ -205,7 +189,7 @@ int tsd_card_init(struct tsd_card *card, struct tsd_host *host, uint8_t width, u
   card->address = relative >> TSD_RCA_SHIFT;
 
   // Count the card's blocks, which CMD9 reads before the card is selected
-  ret = read_capacity(card);
+  ret = read_capacity_sd(card);
   if (ret < 0)
     return ret;
 
@@ -232,4 +216,145 @@ int tsd_card_init(struct tsd_card *card, struct tsd_host *host, uint8_t width, u
     clock_khz = DEFAULT_SPEED_MAX_KHZ;
 
   return tsd_host_set_clock(card->host, clock_khz);
+}
+
+// Repeat ACMD41 until the card leaves idle, offering high capacity to a version 2 card
+static int send_op_cond_spi(struct tsd_card *card, bool version2)
+{
+  uint32_t argument = version2 ? TSD_OCR_CCS : 0;
+  for (uint32_t waited_us = 0; waited_us < POWER_UP_TIMEOUT_MS * 1000; waited_us += POWER_UP_DELAY_US) {
+    // Ask the card to power up, which answers with only an R1 in SPI mode
+    uint32_t r1 = 0;
+    int ret     = send_app_command(card, TSD_ACMD_SD_SEND_OP_COND, argument, TSD_RESPONSE_R1, &r1);
+    if (ret < 0)
+      return ret;
+
+    // Finish once the card leaves idle
+    if (!(r1 & TSD_SPI_R1_IN_IDLE_STATE))
+      return 0;
+
+    // Wait before asking again
+    tsd_delay_us(POWER_UP_DELAY_US);
+  }
+
+  return TSD_ERR_TIMEOUT;
+}
+
+// Read the OCR with CMD58 and note whether the card took high capacity
+static int read_ocr_spi(struct tsd_card *card, bool version2)
+{
+  uint32_t ocr = 0;
+  int ret      = tsd_host_send_command(card->host, TSD_CMD_SPI_READ_OCR, 0, TSD_RESPONSE_R3, &ocr);
+  if (ret < 0)
+    return ret;
+
+  card->high_capacity = version2 && (ocr & TSD_OCR_CCS);
+
+  return 0;
+}
+
+// Read the card's CSD with CMD9, which SPI mode sends as a data block, and count the blocks it holds
+static int read_capacity_spi(struct tsd_card *card)
+{
+  // Ask the card for its CSD
+  uint8_t bytes[TSD_CSD_LEN];
+  struct tsd_command command = {
+    .index         = TSD_CMD_SEND_CSD,
+    .response_type = TSD_RESPONSE_R1,
+  };
+  struct tsd_data data = {
+    .buffer     = bytes,
+    .block_size = TSD_CSD_LEN,
+    .blocks     = 1,
+  };
+  int ret = tsd_host_request(card->host, &command, &data);
+  if (ret < 0)
+    return ret;
+
+  // Gather the bytes into words, most significant first
+  uint32_t csd[TSD_CSD_LEN / 4];
+  for (int i = 0; i < TSD_CSD_LEN / 4; i++)
+    csd[i] = (uint32_t)bytes[i * 4] << 24 | bytes[i * 4 + 1] << 16 | bytes[i * 4 + 2] << 8 | bytes[i * 4 + 3];
+
+  return decode_csd(card, csd);
+}
+
+// Initialize the card in SPI mode, following Figure 7-2 of the SD specification
+static int init_spi(struct tsd_card *card, uint32_t clock_khz)
+{
+  // Reset the card to idle, which puts it in SPI mode
+  int ret = tsd_host_send_command(card->host, TSD_CMD_GO_IDLE_STATE, 0, TSD_RESPONSE_R1, NULL);
+  if (ret < 0)
+    return ret;
+
+  // Check with CMD8 whether the card is version 2
+  bool version2;
+  ret = check_version(card, &version2);
+  if (ret < 0)
+    return ret;
+
+  // Turn CRC checking on, which the SD specification asks for before ACMD41
+  ret = tsd_host_send_command(card->host, TSD_CMD_SPI_CRC_ON_OFF, 1, TSD_RESPONSE_R1, NULL);
+  if (ret < 0)
+    return ret;
+
+  // Power the card up with ACMD41
+  ret = send_op_cond_spi(card, version2);
+  if (ret < 0)
+    return ret;
+
+  // Read whether the card took high capacity with CMD58, since ACMD41 returns only an R1 in SPI mode
+  ret = read_ocr_spi(card, version2);
+  if (ret < 0)
+    return ret;
+
+  // Count the card's blocks
+  ret = read_capacity_spi(card);
+  if (ret < 0)
+    return ret;
+
+  // Set 512-byte blocks on a standard capacity card
+  ret = set_block_length(card);
+  if (ret < 0)
+    return ret;
+
+  // Run a clock above default speed only once the card switches to high speed
+  if (clock_khz > DEFAULT_SPEED_MAX_KHZ && !switch_to_high_speed(card))
+    clock_khz = DEFAULT_SPEED_MAX_KHZ;
+
+  return tsd_host_set_clock(card->host, clock_khz);
+}
+
+int tsd_card_init(struct tsd_card *card, struct tsd_host *host, uint8_t width, uint32_t clock_khz)
+{
+  // Refuse a width the bus does not have
+  if (width != 1 && width != 4)
+    return TSD_ERR_PARAM;
+
+  // Refuse four data lines on an SPI host, which has one
+  if (host->api->spi && width != 1)
+    return TSD_ERR_PARAM;
+
+  // Take the host and start from no address and no read, as a standard capacity card
+  card->host          = host;
+  card->address       = 0;
+  card->high_capacity = false;
+  card->blocks        = 0;
+  card->reading       = false;
+  card->next_block    = UINT32_MAX;
+
+  // Start at the identification clock on one data line
+  int ret = tsd_host_set_clock(card->host, IDENTIFICATION_CLOCK_KHZ);
+  if (ret < 0)
+    return ret;
+  tsd_host_set_bus_width(card->host, 1);
+
+  // Let the clock run before the first command
+  tsd_delay_us(FIRST_COMMAND_DELAY_US);
+
+  // Initialize the card on the bus the host runs
+  if (card->host->api->spi)
+    return init_spi(card, clock_khz);
+
+  return init_sd(card, width, clock_khz);
 }

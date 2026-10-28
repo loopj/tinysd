@@ -141,6 +141,9 @@ struct tsd_host_api {
    * @return 0 or a negative tsd_error
    */
   int (*continue_read)(struct tsd_host *host, void *buffer, uint32_t count);
+
+  /** The host runs the card in SPI mode. */
+  bool spi;
 };
 
 /**

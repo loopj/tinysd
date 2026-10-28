@@ -37,6 +37,9 @@ struct recorded_command {
 struct scripted_reply {
   int ret;
   uint32_t response[4];
+
+  // Bytes a read's data phase receives, or NULL to leave the buffer alone
+  const uint8_t *data;
 };
 
 // A host that records each command and answers it from the script
@@ -52,7 +55,7 @@ struct fake_host {
   // Blocks taken through continue_read
   uint32_t continued_blocks;
 
-  // Checks the card stays busy for before it lets go
+  // Busy checks left before the card lets go
   int busy_checks;
 
   // Function 0 registers and CIS, which CMD52 reads and writes
@@ -100,6 +103,10 @@ static int fake_request(struct tsd_host *host, struct tsd_command *command, stru
   if (data)
     data->done = reply->ret == 0 ? data->blocks * data->block_size : 0;
 
+  // Fill a read from the script's data
+  if (data && !data->write && reply->data)
+    memcpy(data->buffer, reply->data, data->blocks * data->block_size);
+
   return reply->ret;
 }
 
@@ -131,7 +138,9 @@ static int fake_card_busy(struct tsd_host *host)
   if (fake->busy_checks == 0)
     return 0;
 
+  // Count down one check while the card stays busy
   fake->busy_checks--;
+
   return 1;
 }
 
@@ -144,11 +153,26 @@ static const struct tsd_host_api fake_api = {
   .continue_read = fake_continue_read,
 };
 
+// Operations of the fake host in SPI mode
+static const struct tsd_host_api fake_spi_api = {
+  .request       = fake_request,
+  .set_clock     = fake_set_clock,
+  .set_bus_width = fake_set_bus_width,
+  .card_busy     = fake_card_busy,
+  .spi           = true,
+};
+
 // Clear the script and the record, call from setUp()
 static inline void harness_reset(void)
 {
   memset(&host, 0, sizeof(host));
   host.base.api = &fake_api;
+}
+
+// Run the fake host in SPI mode, after harness_reset()
+static inline void harness_use_spi(void)
+{
+  host.base.api = &fake_spi_api;
 }
 
 // Return the last recorded command with an index, or NULL when none was sent

@@ -37,7 +37,7 @@ struct tsd_card {
  *
  * @param card the card
  * @param host the host the card sits on, started by the caller
- * @param width the bus width, 1 or 4
+ * @param width the bus width, 1 or 4, and 1 on an SPI host
  * @param clock_khz the highest clock in kHz, held to 25000 for a card without high speed
  * @return 0 or a negative tsd_error
  */

@@ -77,6 +77,9 @@
 #define TSD_IF_COND_VOLTAGE_2_7_3_6V   1
 #define TSD_IF_COND_CHECK_PATTERN      0xaa
 
+/** Bytes in the CSD, which SPI mode reads as a data block. */
+#define TSD_CSD_LEN                    16
+
 /** CSD structure, in response word 0, which holds CSD bits 127 to 96. */
 #define TSD_CSD_STRUCTURE              TSD_BITS(31, 30)
 

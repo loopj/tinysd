@@ -99,6 +99,17 @@ static void test_identify(void)
   TEST_ASSERT_EQUAL_HEX16(0x1234, fields.card_id);
 }
 
+// Test that init and identify refuse an SPI host without a command
+static void test_spi_host_refused(void)
+{
+  harness_use_spi();
+
+  struct tsd_sdio_cis fields;
+  TEST_ASSERT_EQUAL(TSD_ERR_PARAM, tsd_sdio_init(&card, &host.base, 1, 400));
+  TEST_ASSERT_EQUAL(TSD_ERR_PARAM, tsd_sdio_identify(&host.base, &fields));
+  TEST_ASSERT_EQUAL(0, host.command_count);
+}
+
 // Test that a transfer moves whole blocks in block mode, then the rest in byte mode from where they ended
 static void test_transfer_split(void)
 {
@@ -222,6 +233,7 @@ int main(int argc, char **argv)
 
   RUN_TEST(test_manufacturer_from_cis);
   RUN_TEST(test_identify);
+  RUN_TEST(test_spi_host_refused);
   RUN_TEST(test_transfer_split);
   RUN_TEST(test_byte_mode_512);
   RUN_TEST(test_argument_out_of_range);

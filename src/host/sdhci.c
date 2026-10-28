@@ -748,6 +748,7 @@ static int card_busy(struct tsd_host *host)
 
   // Read the DAT line levels and test DAT0
   uint32_t levels = TSD_FIELD_GET(STATE_DAT_3_0_LEVEL, read32(sdhci, REG_PRESENT_STATE));
+
   return !(levels & TSD_BIT(0));
 }
 

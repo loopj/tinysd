@@ -294,6 +294,10 @@ int tsd_sdio_identify(struct tsd_host *host, struct tsd_sdio_cis *cis)
 {
   struct tsd_sdio card = {0};
 
+  // Refuse an SPI host before CMD0, which would leave the card in SPI mode until a power cycle
+  if (host->api->spi)
+    return TSD_ERR_PARAM;
+
   // Enumerate the card to read its ids
   int ret = enumerate_card(&card, host);
 
@@ -308,6 +312,10 @@ int tsd_sdio_init(struct tsd_sdio *card, struct tsd_host *host, uint8_t width, u
 {
   // Refuse a width the bus does not have
   if (width != 1 && width != 4)
+    return TSD_ERR_PARAM;
+
+  // Refuse an SPI host before CMD0, which would leave the card in SPI mode until a power cycle
+  if (host->api->spi)
     return TSD_ERR_PARAM;
 
   // Enumerate the card

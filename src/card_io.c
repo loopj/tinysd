@@ -36,6 +36,17 @@
    TSD_STATUS_ERASE_PARAM |     \
    TSD_STATUS_WP_ERASE_SKIP)
 
+// Error bits of the R2 that CMD13 returns in SPI mode
+#define SPI_STATUS_ERRORS          \
+  (TSD_SPI_R2_CARD_IS_LOCKED |     \
+   TSD_SPI_R2_WP_ERASE_SKIP |      \
+   TSD_SPI_R2_ERROR |              \
+   TSD_SPI_R2_CC_ERROR |           \
+   TSD_SPI_R2_CARD_ECC_FAILED |    \
+   TSD_SPI_R2_WP_VIOLATION |       \
+   TSD_SPI_R2_ERASE_PARAM |        \
+   TSD_SPI_R2_OUT_OF_RANGE)
+
 // Address a block by number on a high capacity card and by byte offset on the others
 static uint32_t block_address(struct tsd_card *card, uint32_t block)
 {
@@ -71,8 +82,8 @@ static int transfer_blocks(struct tsd_card *card, void *buffer, uint32_t block, 
   };
   int ret = tsd_host_request(card->host, &command, &data);
 
-  // End a multiple block transfer with CMD12, even after a failure, and report the first error
-  if (count > 1) {
+  // End a multiple block transfer with CMD12, even after a failure, unless an SPI host already ended it
+  if (count > 1 && !card->host->api->spi) {
     // Wait out a busy only after a write, since a read leaves the card nothing to program
     enum tsd_response stop_type = write ? TSD_RESPONSE_R1B : TSD_RESPONSE_R1;
 
@@ -102,18 +113,21 @@ static int wait_ready(struct tsd_card *card, uint32_t errors, uint64_t timeout_u
 
     // Ask a card that has let go for its status
     if (ret == 0) {
-      uint32_t status = 0;
-      ret             = tsd_host_send_command(card->host, TSD_CMD_SEND_STATUS, address, TSD_RESPONSE_R1, &status);
+      // Read the status as an R2 in SPI mode and an R1 otherwise
+      bool spi               = card->host->api->spi;
+      enum tsd_response type = spi ? TSD_RESPONSE_R2 : TSD_RESPONSE_R1;
+      uint32_t status        = 0;
+      ret                    = tsd_host_send_command(card->host, TSD_CMD_SEND_STATUS, address, type, &status);
       if (ret < 0)
         return ret;
 
       // Report an error bit the card set
-      if (status & errors)
+      if (status & (spi ? SPI_STATUS_ERRORS : errors))
         return TSD_ERR_CARD;
 
-      // Finish once the card is ready for data in the transfer state
+      // Finish in SPI mode, which has no state, or once the card is ready for data in the transfer state
       uint32_t state = TSD_FIELD_GET(TSD_STATUS_CURRENT_STATE, status);
-      if ((status & TSD_STATUS_READY_FOR_DATA) && state == TSD_STATUS_STATE_TRAN)
+      if (spi || ((status & TSD_STATUS_READY_FOR_DATA) && state == TSD_STATUS_STATE_TRAN))
         return 0;
     }
 
