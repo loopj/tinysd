@@ -10,4 +10,5 @@
 #include <tinysd/frame.h>
 #include <tinysd/host.h>
 #include <tinysd/host/sdhci.h>
+#include <tinysd/host/spi.h>
 #include <tinysd/sdio.h>

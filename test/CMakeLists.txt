@@ -36,3 +36,7 @@ target_link_libraries(test_card tinysd_card)
 # SDIO card driver tests, against the fake host in harness.h
 add_tinysd_test(test_sdio test_sdio.c)
 target_link_libraries(test_sdio tinysd_sdio)
+
+# SPI host tests, against a fake bus
+add_tinysd_test(test_spi test_spi.c)
+target_link_libraries(test_spi tinysd_spi)

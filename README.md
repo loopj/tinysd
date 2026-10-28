@@ -14,6 +14,7 @@ Dependency-free C library for SD cards and SDIO on embedded and bare-metal syste
 - SD memory card driver (SDSC, SDHC and SDXC) with high speed support
 - SDIO card driver with byte and block transfers, card interrupts, and high speed support
 - SDHCI host driver for SD Host Controller versions 1 to 3
+- SPI host driver for SD memory cards on any SPI peripheral
 - Simple interface for adding your own SD hosts
 - CRC and framing helpers for software hosts (bit-banged, PIO, etc)
 - Polling API, no threads, callbacks or interrupts
@@ -51,7 +52,7 @@ void tsd_delay_us(uint32_t microseconds)
 
 ### Initializing a Host
 
-A host drives the SD bus, and the card drivers talk to it through `struct tsd_host`.
+A host drives the SD bus, and the card drivers talk to it through `struct tsd_host`. TinySD has built-in hosts for SDHCI controllers and SPI buses, or you can write your own.
 
 For example, if using the built-in SDHCI host controller:
 
@@ -66,11 +67,11 @@ int ret = tsd_sdhci_init(&sdhci, config);
 struct tsd_host *host = TSD_HOST(&sdhci);
 ```
 
-For other hosts, see [Writing Your Own Host](#writing-your-own-host).
+See [Hosts](#hosts) for how to set up each built-in host, and how to write your own.
 
 ### Using SD Memory Cards
 
-Bring the card up at the bus width and highest clock you want. It runs slower if the card cannot keep up.
+Bring the card up on 1 or 4 data lines, at the highest clock you want in kHz, such as 50000 for 50 MHz. A card without high speed runs at 25 MHz instead. An SPI host has one data line, so pass 1.
 
 ```c
 static struct tsd_card card;
@@ -87,9 +88,9 @@ ret = tsd_card_write(&card, buffer, 0, 1);
 ret = tsd_card_sync(&card);
 ```
 
-### Bring Your Own Filesystem
+#### Bring Your Own Filesystem
 
-TinySD reads and writes raw blocks, so it is usually paired with a filesystem such as [FatFs](https://elm-chan.org/fsw/ff/), [littlefs](https://github.com/littlefs-project/littlefs), etc.
+TinySD reads and writes raw blocks, so it is usually paired with a filesystem such as ChaN's [FatFs](https://elm-chan.org/fsw/ff/), [littlefs](https://github.com/littlefs-project/littlefs), etc.
 
 For example, when using FatFs:
 
@@ -102,7 +103,6 @@ For example, when using FatFs:
 | `CTRL_TRIM` in `disk_ioctl`        | `tsd_card_erase`      |
 | `GET_SECTOR_SIZE` in `disk_ioctl`  | `TSD_CARD_BLOCK_SIZE` |
 | `GET_SECTOR_COUNT` in `disk_ioctl` | `card.blocks`         |
-
 
 ### Using SDIO Devices
 
@@ -127,13 +127,56 @@ ret = tsd_sdio_transfer(&sdio, 1, 0x100, false, buffer, sizeof(buffer), 64, NULL
 
 After init, the ids from the card's CIS are in `sdio.cis`. To read them without bringing the card up, call `tsd_sdio_identify`, which fills in a `struct tsd_sdio_cis` and leaves the card for another driver.
 
-## Running from RAM
+## Hosts
 
-To speed up transfers, or to keep them running while flash is unavailable, place `card_io.c`, `sdio_io.c`, `frame.c` and `crc.c` in RAM from your linker script, along with their read-only data. Everything they call must be in RAM too, including your host's operations, `tsd_delay_us` and compiler helpers such as `memcpy`.
+### SDHCI
 
-## Writing Your Own Host
+The SDHCI host drives an SD Host Controller, versions 1 to 3, through its registers.
 
-For systems without an SDHCI controller, you can write your own host, such as one that bit-bangs the bus or drives it with PIO. Hosts like these can build and check frames with `frame.h` and `crc.h`.
+```c
+static struct tsd_sdhci sdhci;
+
+struct tsd_sdhci_config config = {
+  // Register base address, as the CPU sees it
+  .base = SDHCI_BASE,
+
+  // Map buffers for DMA, or leave these NULL to move data through the FIFO
+  .dma_map   = my_dma_map,
+  .dma_unmap = my_dma_unmap,
+};
+int ret = tsd_sdhci_init(&sdhci, config);
+```
+
+### SPI
+
+The SPI host runs a memory card in SPI mode, through four functions you provide. SDIO is not supported on SPI hosts.
+
+```c
+static struct tsd_spi spi;
+
+struct tsd_spi_config config = {
+  // Send bytes and ignore what comes back
+  .write = my_spi_write,
+
+  // Receive bytes while sending 0xff
+  .read = my_spi_read,
+
+  // Drive chip select low to select the card, or high to release it
+  .select = my_spi_select,
+
+  // Run the clock at the highest rate at or below a limit in kHz
+  .set_clock = my_spi_set_clock,
+};
+
+// Start the host, which clocks the card awake at 400 kHz
+int ret = tsd_spi_init(&spi, config);
+```
+
+For wiring, see ChaN's excellent [How to Use MMC/SDC](https://elm-chan.org/docs/mmc/mmc_e.html) guide to SD cards in SPI mode. It covers the pinout, the pull-ups and the power a card needs.
+
+### Your Own Host
+
+For systems without an SDHCI controller or an SPI peripheral, you can write your own host, such as one that bit-bangs the bus or drives it with PIO. Hosts like these can build and check frames with `frame.h` and `crc.h`.
 
 Make a struct that embeds `struct tsd_host` as its first field, and point it at a table of your host's operations.
 
@@ -146,12 +189,17 @@ static const struct tsd_host_api my_api = {
   .request       = my_request,
   .set_clock     = my_set_clock,
   .set_bus_width = my_set_bus_width,
+  .card_busy     = my_card_busy,
 };
 
 static struct my_host my_host = {.base.api = &my_api};
 ```
 
 Then pass `TSD_HOST(&my_host)` to the card drivers.
+
+## Running from RAM
+
+To speed up transfers, or to keep them running while flash is unavailable, place `card_io.c`, `sdio_io.c`, `frame.c` and `crc.c` in RAM from your linker script, along with their read-only data. Everything they call must be in RAM too, including your host's operations, `tsd_delay_us` and compiler helpers such as `memcpy`.
 
 ## License
 
