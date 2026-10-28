@@ -116,6 +116,14 @@ struct tsd_host_api {
   void (*set_bus_width)(struct tsd_host *host, uint8_t width);
 
   /**
+   * Report whether the card holds its data line low while it programs or erases.
+   *
+   * @param host the host
+   * @return 1 while the card is busy, 0 once it is free, or a negative tsd_error
+   */
+  int (*card_busy)(struct tsd_host *host);
+
+  /**
    * Enable or disable the card interrupt. Optional, and NULL for a host without a card interrupt.
    *
    * @param host the host
@@ -197,6 +205,17 @@ static inline int tsd_host_set_clock(struct tsd_host *host, uint32_t clock_khz)
 static inline void tsd_host_set_bus_width(struct tsd_host *host, uint8_t width)
 {
   host->api->set_bus_width(host, width);
+}
+
+/**
+ * Report whether the card holds its data line low while it programs or erases.
+ *
+ * @param host the host
+ * @return 1 while the card is busy, 0 once it is free, or a negative tsd_error
+ */
+static inline int tsd_host_card_busy(struct tsd_host *host)
+{
+  return host->api->card_busy(host);
 }
 
 /**

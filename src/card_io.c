@@ -95,20 +95,27 @@ static int wait_ready(struct tsd_card *card, uint32_t errors, uint64_t timeout_u
 {
   uint32_t address = card->address << TSD_RCA_SHIFT;
   for (uint64_t waited_us = 0; waited_us < timeout_us; waited_us += READY_DELAY_US) {
-    // Ask the card for its status
-    uint32_t status = 0;
-    int ret         = tsd_host_send_command(card->host, TSD_CMD_SEND_STATUS, address, TSD_RESPONSE_R1, &status);
+    // Check whether the card still holds its data line low
+    int ret = tsd_host_card_busy(card->host);
     if (ret < 0)
       return ret;
 
-    // Report an error bit the card set
-    if (status & errors)
-      return TSD_ERR_CARD;
+    // Ask a card that has let go for its status
+    if (ret == 0) {
+      uint32_t status = 0;
+      ret             = tsd_host_send_command(card->host, TSD_CMD_SEND_STATUS, address, TSD_RESPONSE_R1, &status);
+      if (ret < 0)
+        return ret;
 
-    // Finish once the card is ready for data in the transfer state
-    uint32_t state = TSD_FIELD_GET(TSD_STATUS_CURRENT_STATE, status);
-    if ((status & TSD_STATUS_READY_FOR_DATA) && state == TSD_STATUS_STATE_TRAN)
-      return 0;
+      // Report an error bit the card set
+      if (status & errors)
+        return TSD_ERR_CARD;
+
+      // Finish once the card is ready for data in the transfer state
+      uint32_t state = TSD_FIELD_GET(TSD_STATUS_CURRENT_STATE, status);
+      if ((status & TSD_STATUS_READY_FOR_DATA) && state == TSD_STATUS_STATE_TRAN)
+        return 0;
+    }
 
     // Wait before asking again
     tsd_delay_us(READY_DELAY_US);

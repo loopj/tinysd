@@ -146,6 +146,7 @@ static const struct tsd_host_api my_api = {
   .request       = my_request,
   .set_clock     = my_set_clock,
   .set_bus_width = my_set_bus_width,
+  .card_busy     = my_card_busy,
 };
 
 static struct my_host my_host = {.base.api = &my_api};

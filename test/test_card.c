@@ -159,6 +159,17 @@ static void test_erase(void)
   TEST_ASSERT_EQUAL_INT(TSD_RESPONSE_R1, harness_find(TSD_CMD_ERASE)->response_type);
 }
 
+// Test that an erase sends CMD13 only once the card lets go of its data line
+static void test_erase_waits_while_busy(void)
+{
+  init_high_capacity();
+  host.busy_checks = 3;
+
+  TEST_ASSERT_EQUAL_INT(0, tsd_card_erase(&card, 8, 8));
+  TEST_ASSERT_EQUAL_INT(0, host.busy_checks);
+  TEST_ASSERT_EQUAL_INT(1, harness_count(TSD_CMD_SEND_STATUS));
+}
+
 // Test that an erase reports an error bit the card sets once it finishes
 static void test_erase_error(void)
 {
@@ -194,6 +205,7 @@ int main(int argc, char **argv)
   RUN_TEST(test_open_read);
   RUN_TEST(test_multiple_block_write);
   RUN_TEST(test_erase);
+  RUN_TEST(test_erase_waits_while_busy);
   RUN_TEST(test_erase_error);
   RUN_TEST(test_past_the_end);
 

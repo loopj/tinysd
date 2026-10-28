@@ -52,6 +52,9 @@ struct fake_host {
   // Blocks taken through continue_read
   uint32_t continued_blocks;
 
+  // Checks the card stays busy for before it lets go
+  int busy_checks;
+
   // Function 0 registers and CIS, which CMD52 reads and writes
   uint8_t f0[HARNESS_F0_SIZE];
 };
@@ -121,11 +124,23 @@ static void fake_set_bus_width(struct tsd_host *host, uint8_t width)
 {
 }
 
+// Report the card busy for the scripted number of checks
+static int fake_card_busy(struct tsd_host *host)
+{
+  struct fake_host *fake = (struct fake_host *)host;
+  if (fake->busy_checks == 0)
+    return 0;
+
+  fake->busy_checks--;
+  return 1;
+}
+
 // Operations of the fake host
 static const struct tsd_host_api fake_api = {
   .request       = fake_request,
   .set_clock     = fake_set_clock,
   .set_bus_width = fake_set_bus_width,
+  .card_busy     = fake_card_busy,
   .continue_read = fake_continue_read,
 };
 

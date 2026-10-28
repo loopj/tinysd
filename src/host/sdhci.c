@@ -741,6 +741,16 @@ static void set_bus_width(struct tsd_host *host, uint8_t width)
   write8(sdhci, REG_CTRL, host_control);
 }
 
+// Report the card busy while it holds DAT0 low
+static int card_busy(struct tsd_host *host)
+{
+  struct tsd_sdhci *sdhci = TSD_SDHCI(host);
+
+  // Read the DAT line levels and test DAT0
+  uint32_t levels = TSD_FIELD_GET(STATE_DAT_3_0_LEVEL, read32(sdhci, REG_PRESENT_STATE));
+  return !(levels & TSD_BIT(0));
+}
+
 // Let the card interrupt reach the CPU or stop it
 static void set_card_interrupt(struct tsd_host *host, bool on)
 {
@@ -756,6 +766,7 @@ static const struct tsd_host_api sdhci_api = {
   .request            = send_request,
   .set_clock          = set_clock,
   .set_bus_width      = set_bus_width,
+  .card_busy          = card_busy,
   .set_card_interrupt = set_card_interrupt,
 };
 
